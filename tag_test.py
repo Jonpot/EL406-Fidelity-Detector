@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from robotpy_apriltag import AprilTagDetector as apriltag
 
-imagepath = 'test2.png'
+imagepath = 'fiducial_comparison.png'
 img = cv2.imread(imagepath, cv2.IMREAD_GRAYSCALE)
 detector = apriltag()
 detector.addFamily("tagStandard41h12")
