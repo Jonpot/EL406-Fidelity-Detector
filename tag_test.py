@@ -2,8 +2,16 @@ import cv2
 import numpy as np
 from robotpy_apriltag import AprilTagDetector as apriltag
 
-imagepath = 'test2.png'
-img = cv2.imread(imagepath, cv2.IMREAD_GRAYSCALE)
+video_path = 'videos/new_fiducials.mjpeg'
+# Open the video file
+cap = cv2.VideoCapture(video_path)
+    
+# Check if video opened successfully
+if not cap.isOpened():
+    print("Error: Could not open video.")
+
+_, img = cap.read()
+img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 detector = apriltag()
 detector.addFamily("tagStandard41h12")
 
