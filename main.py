@@ -1,4 +1,4 @@
-from detect_clogs import threshold_video_movement, detect_fiducial
+from detect_clogs import threshold_video_movement, detect_fiducial, front_homography, back_homography, classify_nozzles
 import time
 from picamzero import Camera
 import requests
@@ -54,9 +54,18 @@ def check_nozzles(front, back, fiducial_coordinate) -> dict[str,list[bool]]:
         A dictionary containing the nozzle report, with the keys 'front' and 'back' and the values being lists of
         booleans indicating whether the nozzle is clogged or not.
     """
+    # front_nozzles, back_nozzles, fiducial_coordinate = threshold_video_movement(video_path)
 
-    # unimplemented
-    return {'front': [False, False, False], 'back': [False, False, False]}
+    warped_image_front = front_homography(fiducial_coordinate, front)
+    warped_image_back = back_homography(fiducial_coordinate, back)
+
+    report_front = classify_nozzles(warped_image_front, section='front')
+    report_back = classify_nozzles(warped_image_back, section='back')
+
+    nozzle_status = {**report_front, **report_back}
+
+    return nozzle_status
+
 
 def send_webhook(nozzle_report: dict[str,list[bool]], video_path: str):
     """
@@ -98,7 +107,7 @@ def main():
 
     # Check if the nozzles are clogged
     nozzle_report = check_nozzles(front, back, fiducial_coordinate)
-
+    print(nozzle_report)
     # Send the nozzle report to a webhook along with video if nozzles are clogged
     if any(nozzle_report['front']) or any(nozzle_report['back']):
         print("Nozzles are clogged, sending report to webhook.")
