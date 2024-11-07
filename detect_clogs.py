@@ -1,7 +1,8 @@
 import cv2
 import numpy as np
+from robotpy_apriltag import AprilTagDetector as apriltag
 
-def threshold_video_movement(video_path: str) -> np.ndarray:
+def threshold_video_movement(video_path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Detect significant changes in a video using background subtraction and thresholding.
 
@@ -29,10 +30,15 @@ def threshold_video_movement(video_path: str) -> np.ndarray:
     current_row = 0
     between_nozzles = False
     
+    fiducial_coordinate = None
+
     while True:
         ret, frame = cap.read()
         if not ret:
             break  # End of video
+
+        if fiducial_coordinate is None:
+            fiducial_coordinate = detect_fiducial(frame)
 
         # Apply background subtraction to get the foreground mask
         fg_mask = backSub.apply(frame)
@@ -80,10 +86,35 @@ def threshold_video_movement(video_path: str) -> np.ndarray:
     _, thresholded_image_back_nozzles = cv2.threshold(accum_mask_uint8_back, 0, 255, cv2.THRESH_BINARY)
 
     # Return the thresholded image highlighting significant changes
-    return thresholded_image_front_nozzles, thresholded_image_back_nozzles 
+    return thresholded_image_front_nozzles, thresholded_image_back_nozzles, fiducial_coordinate
 
 #output_image = threshold_video_movement('test-clogged.mjpeg')
 #output_image = detect_clogged_nozzles('test2_0920.mjpeg')
 front_nozzles, back_nozzles = threshold_video_movement('videos/Lighting2-1.mp4')
 cv2.imwrite('clogged_nozzles_front.png', front_nozzles)
 cv2.imwrite('clogged_nozzles_back.png', back_nozzles)
+
+
+def detect_fiducial(frame: np.ndarray) -> np.ndarray:
+    """
+    Detect fiducial in the frame using AprilTag.
+
+    Args:
+        frame: Image frame.
+
+    Returns:
+        The coordinate of the fiducial.
+    """
+
+    img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    detector = apriltag()
+    detector.addFamily("tagStandard41h12")
+
+    detections = detector.detect(img)
+
+    center = None
+    for detection in detections:
+        if detection.getId() == 2:
+            center = detection.getCenter()
+
+    return center
