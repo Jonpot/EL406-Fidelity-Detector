@@ -1,8 +1,12 @@
 import cv2
 import numpy as np
-from robotpy_apriltag import AprilTagDetector as apriltag
+
+<<<<<<< Updated upstream
+def threshold_video_movement(video_path: str) -> np.ndarray:
+=======
 
 def threshold_video_movement(video_path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+>>>>>>> Stashed changes
     """
     Detect significant changes in a video using background subtraction and thresholding.
 
@@ -14,7 +18,7 @@ def threshold_video_movement(video_path: str) -> tuple[np.ndarray, np.ndarray, n
     """
     # Open the video file
     cap = cv2.VideoCapture(video_path)
-    
+
     # Check if video opened successfully
     if not cap.isOpened():
         print("Error: Could not open video.")
@@ -22,30 +26,41 @@ def threshold_video_movement(video_path: str) -> tuple[np.ndarray, np.ndarray, n
 
     # Create a background subtractor object
     backSub = cv2.createBackgroundSubtractorMOG2(history=10, varThreshold=40, detectShadows=False)
-    
+
     # Initialize variables
-    accumulated_mask_front = None
-    accumulated_mask_back = None
+    accumulated_mask = None
     frame_count = 0
+<<<<<<< Updated upstream
+=======
     current_row = 0
     between_nozzles = False
-    
+
     fiducial_coordinate = None
+>>>>>>> Stashed changes
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break  # End of video
 
-        if fiducial_coordinate is None:
-            fiducial_coordinate = detect_fiducial(frame)
-
         # Apply background subtraction to get the foreground mask
         fg_mask = backSub.apply(frame)
 
         # if more than 20% of the frame is moving, this is a significant change, and we break and don't accumulate
+<<<<<<< Updated upstream
         #print(np.count_nonzero(fg_mask))
-        #print(np.count_nonzero(fg_mask), 0.1 * fg_mask.size)
+        if frame_count != 0 and np.count_nonzero(fg_mask) > 0.1 * fg_mask.size:
+            break
+        
+        # Initialize the accumulated mask with the same size as fg_mask
+        if accumulated_mask is None:
+            accumulated_mask = np.zeros_like(fg_mask, dtype=np.float32)
+        
+        # Accumulate the foreground masks
+        accumulated_mask += fg_mask.astype(np.float32)
+=======
+        # print(np.count_nonzero(fg_mask))
+        # print(np.count_nonzero(fg_mask), 0.1 * fg_mask.size)
         if not between_nozzles and frame_count != 0 and np.count_nonzero(fg_mask) > 0.025 * fg_mask.size:
             if current_row < 2:
                 print("BETWEEN NOZZLES")
@@ -57,7 +72,7 @@ def threshold_video_movement(video_path: str) -> tuple[np.ndarray, np.ndarray, n
             print("SWITCHING ROWS")
             between_nozzles = False
             current_row += 1
-        
+
         # Initialize the accumulated mask with the same size as fg_mask
         # Accumulate the foreground masks
         if current_row == 0:
@@ -68,26 +83,29 @@ def threshold_video_movement(video_path: str) -> tuple[np.ndarray, np.ndarray, n
             if accumulated_mask_back is None:
                 accumulated_mask_back = np.zeros_like(fg_mask, dtype=np.float32)
             accumulated_mask_back += fg_mask.astype(np.float32)
-        
+
+>>>>>>> Stashed changes
         frame_count += 1
 
     cap.release()
 
     # Normalize the accumulated mask
-    accumulated_mask_front /= frame_count
-    accumulated_mask_back /= frame_count
+    accumulated_mask /= frame_count
 
     # Convert accumulated mask to 8-bit image
-    accum_mask_uint8_front = cv2.normalize(accumulated_mask_front, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    accum_mask_uint8_back = cv2.normalize(accumulated_mask_back, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    accum_mask_uint8 = cv2.normalize(accumulated_mask, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
     # Apply adaptive thresholding (Binary Threshold method) to find significant changes
-    _, thresholded_image_front_nozzles = cv2.threshold(accum_mask_uint8_front, 0, 255, cv2.THRESH_BINARY)
-    _, thresholded_image_back_nozzles = cv2.threshold(accum_mask_uint8_back, 0, 255, cv2.THRESH_BINARY)
+    _, thresholded_image = cv2.threshold(accum_mask_uint8, 0, 255, cv2.THRESH_BINARY)
 
     # Return the thresholded image highlighting significant changes
-    return thresholded_image_front_nozzles, thresholded_image_back_nozzles, fiducial_coordinate
+    return thresholded_image
 
+<<<<<<< Updated upstream
+output_image = threshold_video_movement('test-clogged.mjpeg')
+#output_image = detect_clogged_nozzles('test2_0920.mjpeg')
+cv2.imwrite('clogged_nozzles_output.png', output_image)
+=======
 
 def detect_fiducial(frame: np.ndarray) -> np.ndarray:
     """
@@ -137,6 +155,7 @@ def front_homography(fiducial_coordinate, image):
         ], dtype=float)
         print("Fiducials detected. Using relative coordinates.\n")
 
+    # The following code is to load directly the processed front image, uncomment to use
     # image = cv2.imread(image_path)
     # if image is None:
     #    raise FileNotFoundError(f"Could not load the image at path: {image_path}")
@@ -167,7 +186,7 @@ def front_homography(fiducial_coordinate, image):
 
 def back_homography(fiducial_coordinate, image):
     detections = fiducial_coordinate
-    # print(len(detections))
+
     if detections is None:
         pts_src = np.array([
             [422, 180],  # Top-left 388, 180
@@ -196,6 +215,7 @@ def back_homography(fiducial_coordinate, image):
         # plt.title("First Frame with Fiducials Marked")
         # plt.axis('off')
         # plt.show()
+
         pts_src = np.array([  # 900, 600
             [x - 578, y - 420],  # Top-left 422, 180
             [x - 110, y - 315],  # Top-right 790, 285
@@ -204,6 +224,7 @@ def back_homography(fiducial_coordinate, image):
         ], dtype=float)
         print("Fiducials detected. Using relative coordinates.\n")
 
+    # Used to load the image (back/front) directly
     # image = cv2.imread(image_path)
     # if image is None:
     #    raise FileNotFoundError(f"Could not load the image at path: {image_path}")
@@ -222,13 +243,15 @@ def back_homography(fiducial_coordinate, image):
 
     warped_image = cv2.warpPerspective(image, homography_matrix, (width, height))
 
-    #plt.figure(figsize=(10, 6))
-    #plt.imshow(cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB))
-    #plt.title("Warped Image with Homography Transformation (One Fiducial)")
-    #plt.axis('off')
-    #plt.show()
+    # The following code is to draw homography transformation results, uncomment to use
+    # plt.figure(figsize=(10, 6))
+    # plt.imshow(cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB))
+    # plt.title("Warped Image with Homography Transformation (One Fiducial)")
+    # plt.axis('off')
+    # plt.show()
 
     return warped_image
+
 
 def classify_nozzles(warped_image, section='front'):
     """
@@ -271,12 +294,38 @@ def classify_nozzles(warped_image, section='front'):
 
     nozzle_status = []
 
-    # Detect clogged nozzles based on statistical outlier and <5% threshold
+    # Detect clogged nozzles based on z-score and <5% threshold
     for i, ratio in enumerate(white_ratios):
         z_score = (ratio - mean_ratio) / std_ratio
-        is_clogged = z_score < threshold_z or ratio < 0.05
+        is_clogged = z_score < threshold_z or ratio < 0.05  # less than 5% white pixels or 2 std deviations behind
         nozzle_status.append(is_clogged)
 
+    # The following code is to Draw bounding boxes and add text on the warped image, uncomment to use
+    # if len(warped_image.shape) == 2:
+    #    warped_image_color = cv2.cvtColor(warped_image, cv2.COLOR_GRAY2BGR)
+    # else:
+    #    warped_image_color = warped_image
+
+    # for i in range(num_nozzles):
+    #    x_start = i * nozzle_width
+    #    x_end = (i + 1) * nozzle_width if (i + 1) < num_nozzles else width
+    #    y_start = int(0.10 * height)
+    #    y_end = int(0.90 * height)
+
+    #    cv2.rectangle(warped_image_color, (x_start, y_start), (x_end, y_end), (0, 255, 0), 2)
+
+    #    text_value = int(white_ratios[i] * 100)
+    #    text_color = (0, 0, 204) if white_ratios[i] <= 0.15 else (255, 0, 0)
+    #    text_position = (x_start + 2, y_start - 5)
+    #    cv2.putText(warped_image_color, f"{text_value}", text_position, cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color, 2)
+
+    # Display the warped image with nozzle regions marked
+    # plt.figure(figsize=(12, 8))
+    # plt.imshow(cv2.cvtColor(warped_image_color, cv2.COLOR_BGR2RGB))
+    # plt.title(f"Warped Image with Nozzle Regions Marked ({section.capitalize()} Nozzles)")
+    # plt.axis('off')
+    # plt.show()
 
     # Return the status of front or back nozzles
     return {section: nozzle_status}
+>>>>>>> Stashed changes
