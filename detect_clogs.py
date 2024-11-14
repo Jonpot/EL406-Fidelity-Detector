@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from robotpy_apriltag import AprilTagDetector as apriltag
 
-def threshold_video_movement(video_path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def threshold_video_movement(video_path: str) -> list[dict]:
     """
     Detect significant changes in a video using background subtraction and thresholding.
 
@@ -10,7 +10,9 @@ def threshold_video_movement(video_path: str) -> tuple[np.ndarray, np.ndarray, n
         video_path: Path to the video file.
 
     Returns:
-        A thresholded image highlighting significant changes in the video.
+        A list of dictionaries, each containing:
+        - 'thresholded_image': the thresholded image for the cycle
+        - 'fiducial_coordinate': the coordinate of the fiducial (if any)
     """
     # Open the video file
     cap = cv2.VideoCapture(video_path)
@@ -24,12 +26,9 @@ def threshold_video_movement(video_path: str) -> tuple[np.ndarray, np.ndarray, n
     backSub = cv2.createBackgroundSubtractorMOG2(history=10, varThreshold=40, detectShadows=False)
     
     # Initialize variables
-    accumulated_mask_front = None
-    accumulated_mask_back = None
-    frame_count = 0
-    current_row = 0
-    between_nozzles = False
-    
+    cycles = []
+    current_cycle = None
+    state = 'waiting_for_cycle'
     fiducial_coordinate = None
 
     while True:
@@ -43,50 +42,71 @@ def threshold_video_movement(video_path: str) -> tuple[np.ndarray, np.ndarray, n
         # Apply background subtraction to get the foreground mask
         fg_mask = backSub.apply(frame)
 
-        # if more than 20% of the frame is moving, this is a significant change, and we break and don't accumulate
-        #print(np.count_nonzero(fg_mask))
-        #print(np.count_nonzero(fg_mask), 0.1 * fg_mask.size)
-        if not between_nozzles and frame_count != 0 and np.count_nonzero(fg_mask) > 0.025 * fg_mask.size:
-            if current_row < 2:
-                print("BETWEEN NOZZLES")
-                between_nozzles = True
-            else:
-                break
+        movement_amount = np.count_nonzero(fg_mask)
+        staleness = 0
 
-        if between_nozzles and np.count_nonzero(fg_mask) < 0.025 * fg_mask.size:
-            print("SWITCHING ROWS")
-            between_nozzles = False
-            current_row += 1
-        
-        # Initialize the accumulated mask with the same size as fg_mask
-        # Accumulate the foreground masks
-        if current_row == 0:
-            if accumulated_mask_front is None:
-                accumulated_mask_front = np.zeros_like(fg_mask, dtype=np.float32)
-            accumulated_mask_front += fg_mask.astype(np.float32)
-        elif current_row == 2:
-            if accumulated_mask_back is None:
-                accumulated_mask_back = np.zeros_like(fg_mask, dtype=np.float32)
-            accumulated_mask_back += fg_mask.astype(np.float32)
-        
-        frame_count += 1
+        # Define movement thresholds
+        low_movement_threshold = 0.025 * fg_mask.size
+        high_movement_threshold = 0.05 * fg_mask.size
+
+        if state == 'waiting_for_cycle':
+            if movement_amount < low_movement_threshold:
+                # Start a new cycle
+                current_cycle = {'accum_mask': np.zeros_like(fg_mask, dtype=np.float32),
+                                 'frame_count': 0}
+                state = 'in_cycle'
+                print("Starting new cycle")
+        elif state == 'in_cycle':
+            # Accumulate the fg_mask
+            current_cycle['accum_mask'] += fg_mask.astype(np.float32)
+            current_cycle['frame_count'] += 1
+
+            if movement_amount > high_movement_threshold:
+                # End of cycle
+                cycles.append(current_cycle)
+                current_cycle = None
+                state = 'waiting_for_movement'
+                print("End of cycle")
+        elif state == 'waiting_for_movement':
+            if movement_amount < low_movement_threshold:
+                state = 'between_cycles'
+                print("Between cycles")
+        elif state == 'between_cycles':
+            if movement_amount > high_movement_threshold:
+                # Robot moving back into frame
+                print(f'Staleness: {staleness}')
+                staleness = 0
+                state = 'waiting_for_cycle'
+                print("Waiting for cycle")
+            else:
+                staleness += 1
+                if staleness > 50:
+                    # 50 frames of no movement, the robot isn't coming back for a second cycle at this point
+                    # This might need to be adjusted
+                    break
+
+    # After processing all frames
+    if current_cycle is not None:
+        cycles.append(current_cycle)
 
     cap.release()
 
-    # Normalize the accumulated mask
-    accumulated_mask_front /= frame_count
-    accumulated_mask_back /= frame_count
+    # For each cycle, normalize the accumulated mask and process
+    for cycle in cycles:
+        frame_count = cycle['frame_count']
+        accumulated_mask = cycle['accum_mask']
+        accumulated_mask /= frame_count
 
-    # Convert accumulated mask to 8-bit image
-    accum_mask_uint8_front = cv2.normalize(accumulated_mask_front, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    accum_mask_uint8_back = cv2.normalize(accumulated_mask_back, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        # Convert accumulated mask to 8-bit image
+        accum_mask_uint8 = cv2.normalize(accumulated_mask, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    # Apply adaptive thresholding (Binary Threshold method) to find significant changes
-    _, thresholded_image_front_nozzles = cv2.threshold(accum_mask_uint8_front, 0, 255, cv2.THRESH_BINARY)
-    _, thresholded_image_back_nozzles = cv2.threshold(accum_mask_uint8_back, 0, 255, cv2.THRESH_BINARY)
+        # Apply thresholding
+        _, thresholded_image = cv2.threshold(accum_mask_uint8, 0, 255, cv2.THRESH_BINARY)
 
-    # Return the thresholded image highlighting significant changes
-    return thresholded_image_front_nozzles, thresholded_image_back_nozzles, fiducial_coordinate
+        cycle['thresholded_image'] = thresholded_image
+        cycle['fiducial_coordinate'] = fiducial_coordinate
+
+    return cycles
 
 
 def detect_fiducial(frame: np.ndarray) -> np.ndarray:
@@ -114,9 +134,18 @@ def detect_fiducial(frame: np.ndarray) -> np.ndarray:
     return center
 
 
-def front_homography(fiducial_coordinate, image):
-    detections = fiducial_coordinate
-    if detections is None:
+def front_homography(fiducial_coordinate: tuple[float, float], image: np.ndarray) -> np.ndarray:
+    """
+    Apply homography transformation to the image using the front fiducial coordinate.
+
+    Args:
+        fiducial_coordinate: The coordinate of the front fiducial.
+        image: The input image.
+
+    Returns:
+        The warped image after homography transformation.
+    """
+    if fiducial_coordinate is None:
         pts_src = np.array([
             [388, 180],  # Top-left 388, 180
             [850, 285],  # Top-right 850, 285
@@ -126,8 +155,7 @@ def front_homography(fiducial_coordinate, image):
         ], dtype=float)
         print("No fiducials detected. Using absolute coordinates.\n")
     else:
-        fiducial_coord = detections
-        x, y = fiducial_coord.x, fiducial_coord.y
+        x, y = fiducial_coordinate.x, fiducial_coordinate.y
 
         pts_src = np.array([
             [x - 512, y - 420],  # Top-left 388, 180
@@ -161,10 +189,19 @@ def front_homography(fiducial_coordinate, image):
     return warped_image
 
 
-def back_homography(fiducial_coordinate, image):
-    detections = fiducial_coordinate
+def back_homography(fiducial_coordinate: tuple[float, float], image: np.ndarray) -> np.ndarray:
+    """
+    Apply homography transformation to the image using the back fiducial coordinate.
+
+    Args:
+        fiducial_coordinate: The coordinate of the back fiducial.
+        image: The input image.
+
+    Returns:
+        The warped image after homography transformation.
+    """
     # print(len(detections))
-    if detections is None:
+    if fiducial_coordinate is None:
         pts_src = np.array([
             [422, 180],  # Top-left 388, 180
             [790, 285],  # Top-right 850, 285
@@ -177,8 +214,7 @@ def back_homography(fiducial_coordinate, image):
         # There should be 1 fiducials:
         # Assuming only one fiducial is used for homography calculation
 
-        fiducial_coord = detections
-        x, y = fiducial_coord.x, fiducial_coord.y
+        x, y = fiducial_coordinate.x, fiducial_coordinate.y
 
         # Debug: Draw fiducial on the first frame
         # cv2.circle(first_frame, (int(center.x), int(center.y)), 5, (0, 0, 255), -1)
@@ -223,7 +259,7 @@ def back_homography(fiducial_coordinate, image):
 
     return warped_image
 
-def classify_nozzles(warped_image, section='front'):
+def classify_nozzles(warped_image: np.ndarray, section: str ='front') -> tuple[dict[str, list[bool]], float]:
     """
     Classify nozzle regions as clogged or not clogged based on white pixel ratio.
 
@@ -232,7 +268,9 @@ def classify_nozzles(warped_image, section='front'):
         section: Specify which section of nozzles to process ('front' or 'back').
 
     Returns:
-        A dictionary containing the clogging status of the nozzles.
+        A tuple containing:
+        - A dictionary with the nozzle status.
+        - The average white_ratio across nozzles.
     """
     num_nozzles = 16
     width = warped_image.shape[1]
@@ -260,17 +298,16 @@ def classify_nozzles(warped_image, section='front'):
     # Calculate mean and standard deviation for statistical outlier detection
     mean_ratio = np.mean(white_ratios)
     std_ratio = np.std(white_ratios)
-    threshold_z = -2.0  # Z-score threshold for 2 standard deviations
+    threshold_z = -1.0  # Z-score threshold for 2 standard deviations
 
     nozzle_status = []
 
     # Detect clogged nozzles based on z-score and <5% threshold
     for i, ratio in enumerate(white_ratios):
-        z_score = (ratio - mean_ratio) / std_ratio
+        z_score = (ratio - mean_ratio) / std_ratio if std_ratio > 0 else 0
         is_clogged = z_score < threshold_z or ratio < 0.05
         nozzle_status.append(is_clogged)
 
-
-    # Return the status of front or back nozzles
-    return {section: nozzle_status}
+    # Return the status of front or back nozzles and the mean white_ratio
+    return {section: nozzle_status}, mean_ratio
     
