@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from robotpy_apriltag import AprilTagDetector as apriltag
+import matplotlib.pyplot as plt
 
 def threshold_video_movement(video_path: str) -> list[dict]:
     """
@@ -29,21 +30,23 @@ def threshold_video_movement(video_path: str) -> list[dict]:
     cycles = []
     current_cycle = None
     state = 'waiting_for_cycle'
-    fiducial_coordinate = None
-
+    fiducial_coordinates = None
+    i = 0
+    staleness = 0
     while True:
+        i += 1
         ret, frame = cap.read()
         if not ret:
             break  # End of video
-
-        if fiducial_coordinate is None:
-            fiducial_coordinate = detect_fiducial(frame)
+        #if i % 3 == 0:
+        #    continue # Skip every other frame to speed up processing
+        if fiducial_coordinates is None:
+            fiducial_coordinates = detect_fiducials(frame)
 
         # Apply background subtraction to get the foreground mask
         fg_mask = backSub.apply(frame)
 
         movement_amount = np.count_nonzero(fg_mask)
-        staleness = 0
 
         # Define movement thresholds
         low_movement_threshold = 0.025 * fg_mask.size
@@ -72,7 +75,7 @@ def threshold_video_movement(video_path: str) -> list[dict]:
                 state = 'between_cycles'
                 print("Between cycles")
         elif state == 'between_cycles':
-            if movement_amount > high_movement_threshold:
+            if movement_amount > high_movement_threshold and staleness > 10:
                 # Robot moving back into frame
                 print(f'Staleness: {staleness}')
                 staleness = 0
@@ -81,6 +84,7 @@ def threshold_video_movement(video_path: str) -> list[dict]:
             else:
                 staleness += 1
                 if staleness > 50:
+                    print("Staleness limit reached")
                     # 50 frames of no movement, the robot isn't coming back for a second cycle at this point
                     # This might need to be adjusted
                     break
@@ -104,12 +108,12 @@ def threshold_video_movement(video_path: str) -> list[dict]:
         _, thresholded_image = cv2.threshold(accum_mask_uint8, 0, 255, cv2.THRESH_BINARY)
 
         cycle['thresholded_image'] = thresholded_image
-        cycle['fiducial_coordinate'] = fiducial_coordinate
+        cycle['fiducial_coordinates'] = fiducial_coordinates
 
     return cycles
 
 
-def detect_fiducial(frame: np.ndarray) -> np.ndarray:
+def detect_fiducials(frame: np.ndarray) -> dict[int, np.ndarray]:
     """
     Detect fiducial in the frame using AprilTag.
 
@@ -126,15 +130,14 @@ def detect_fiducial(frame: np.ndarray) -> np.ndarray:
 
     detections = detector.detect(img)
 
-    center = None
+    centers = {}
     for detection in detections:
-        if detection.getId() == 2:
-            center = detection.getCenter()
+        centers[detection.getId()] = (detection.getCenter())
 
-    return center
+    return centers
 
 
-def front_homography(fiducial_coordinate: tuple[float, float], image: np.ndarray) -> np.ndarray:
+def front_homography(fiducial_coordinates: dict[int, tuple[float, float]], image: np.ndarray) -> np.ndarray:
     """
     Apply homography transformation to the image using the front fiducial coordinate.
 
@@ -145,25 +148,37 @@ def front_homography(fiducial_coordinate: tuple[float, float], image: np.ndarray
     Returns:
         The warped image after homography transformation.
     """
-    if fiducial_coordinate is None:
-        pts_src = np.array([
-            [388, 180],  # Top-left 388, 180
-            [850, 285],  # Top-right 850, 285
-            [388, 302],  # Bottom-left 388, 302
-            [850, 375]  # Bottom-right 850, 375
+    absolute_coordinates = np.array([
+            [449, 247],
+            [902, 321],
+            [455, 421],
+            [914, 467] 
             # This is for front nozzles!
         ], dtype=float)
+    if fiducial_coordinates is None:
+        pts_src = absolute_coordinates
         print("No fiducials detected. Using absolute coordinates.\n")
+    elif len(fiducial_coordinates) == 1:
+        if 2 in fiducial_coordinates:
+            x, y = fiducial_coordinates[2].x, fiducial_coordinates[2].y
+            x0, y0 = (995, 672)
+            # pts_src is thus the absolute coordinates of the fiducial plus the difference between the absolute coordinates of the fiducial and the relative coordinates of the nozzles
+            pts_src = absolute_coordinates + np.array([[x - x0, y - y0]*4], dtype=float) 
+        else:
+            x, y = fiducial_coordinates[1].x, fiducial_coordinates[1].y
+            x0, y0 = (277, 184)
+            pts_src = absolute_coordinates + np.array([[x - x0, y - y0]*4], dtype=float)
+        print("One Fiducial detected. Using relative coordinates.\n")
     else:
-        x, y = fiducial_coordinate.x, fiducial_coordinate.y
-
-        pts_src = np.array([
-            [x - 512, y - 420],  # Top-left 388, 180
-            [x - 50, y - 315],  # Top-right 850, 285
-            [x - 512, y - 298],  # Bottom-left 388, 302
-            [x - 50, y - 225]  # Bottom-right 850, 375
-        ], dtype=float)
-        print("Fiducials detected. Using relative coordinates.\n")
+        print("Multiple fiducials detected. Using fiducial coordinates.")
+        x1, y1 = fiducial_coordinates[1].x, fiducial_coordinates[1].y
+        x10, y10 = (277, 184)
+        x2, y2 = fiducial_coordinates[2].x, fiducial_coordinates[2].y
+        x20, y20 = (995, 672)
+        scale_x = (x2-x1)/(x20-x10)
+        scale_y = (y2-y1)/(y20-y10)
+        pts_src = (absolute_coordinates - np.array([[x10, y10],[x10, y10],[x10, y10],[x10, y10]], dtype=float)) * np.array([[scale_x, scale_y], [scale_x, scale_y], [scale_x, scale_y], [scale_x, scale_y]], dtype=float)
+        pts_src = pts_src + np.array([[x1, y1], [x1, y1], [x1, y1], [x1, y1]], dtype=float)
 
     width = 400
     height = 300
@@ -175,21 +190,24 @@ def front_homography(fiducial_coordinate: tuple[float, float], image: np.ndarray
     ], dtype=float)
 
     # Calculate the homography matrix
+    print(fiducial_coordinates)
+    print(pts_src)
+    print(pts_dst)
     homography_matrix, status = cv2.findHomography(pts_src, pts_dst)
 
     warped_image = cv2.warpPerspective(image, homography_matrix, (width, height))
 
     # Display the warped image
-    # plt.figure(figsize=(10, 6))
-    # plt.imshow(cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB))
-    # plt.title("Warped Image with Homography Transformation (One Fiducial)")
-    # plt.axis('off')
-    # plt.show()
+    plt.figure(figsize=(10, 6))
+    plt.imshow(cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB))
+    plt.title("Warped Image with Homography Transformation (One Fiducial)")
+    plt.axis('off')
+    plt.show()
 
     return warped_image
 
 
-def back_homography(fiducial_coordinate: tuple[float, float], image: np.ndarray) -> np.ndarray:
+def back_homography(fiducial_coordinates: dict[int,tuple[float, float]], image: np.ndarray) -> np.ndarray:
     """
     Apply homography transformation to the image using the back fiducial coordinate.
 
@@ -201,41 +219,37 @@ def back_homography(fiducial_coordinate: tuple[float, float], image: np.ndarray)
         The warped image after homography transformation.
     """
     # print(len(detections))
-    if fiducial_coordinate is None:
-        pts_src = np.array([
-            [422, 180],  # Top-left 388, 180
-            [790, 285],  # Top-right 850, 285
-            [422, 302],  # Bottom-left 388, 302
-            [790, 375]  # Bottom-right 850, 375
-            # This is for BACK nozzles!
-        ], dtype=float)
+    absolute_coordinates = np.array([
+                            [380, 239], 
+                            [844, 334], 
+                            [388, 428], 
+                            [846, 459] 
+                            # This is for BACK nozzles!
+                        ], dtype=float)
+    if fiducial_coordinates is None:
+        pts_src = absolute_coordinates
         print("No fiducials detected. Using absolute coordinates.\n")
+    elif len(fiducial_coordinates) == 1:
+        if 2 in fiducial_coordinates:
+            x, y = fiducial_coordinates[2].x, fiducial_coordinates[2].y
+            x0, y0 = (995, 672)
+            # pts_src is thus the absolute coordinates of the fiducial plus the difference between the absolute coordinates of the fiducial and the relative coordinates of the nozzles
+            pts_src = absolute_coordinates + np.array([[x - x0, y - y0]*4], dtype=float) 
+        else:
+            x, y = fiducial_coordinates[1].x, fiducial_coordinates[1].y
+            x0, y0 = (277, 184)
+            pts_src = absolute_coordinates + np.array([[x - x0, y - y0]*4], dtype=float)
+        print("One Fiducial detected. Using relative coordinates.\n")
     else:
-        # There should be 1 fiducials:
-        # Assuming only one fiducial is used for homography calculation
-
-        x, y = fiducial_coordinate.x, fiducial_coordinate.y
-
-        # Debug: Draw fiducial on the first frame
-        # cv2.circle(first_frame, (int(center.x), int(center.y)), 5, (0, 0, 255), -1)
-        # for i, (label, point) in enumerate([('Top-left', (center.x - 512, center.y - 420)),
-        #                                    ('Top-right', (center.x - 50, center.y - 315)),
-        #                                    ('Bottom-left', (center.x - 512, center.y - 298)),
-        #                                    ('Bottom-right', (center.x - 50, center.y - 225))]):
-        #      cv2.circle(first_frame, (int(point[0]), int(point[1])), 5, (0, 0, 255), -1)
-        # plt.figure(figsize=(10, 6))
-        # plt.imshow(cv2.cvtColor(first_frame, cv2.COLOR_BGR2RGB))
-        # plt.title("First Frame with Fiducials Marked")
-        # plt.axis('off')
-        # plt.show()
-        pts_src = np.array([  # 900, 600
-            [x - 578, y - 420],  # Top-left 422, 180
-            [x - 110, y - 315],  # Top-right 790, 285
-            [x - 578, y - 298],  # Bottom-left 422, 302
-            [x - 110, y - 225]  # Bottom-right 790, 375
-        ], dtype=float)
-        print("Fiducials detected. Using relative coordinates.\n")
-
+        print("Multiple fiducials detected. Using fiducial coordinates.")
+        x1, y1 = fiducial_coordinates[1].x, fiducial_coordinates[1].y
+        x10, y10 = (277, 184)
+        x2, y2 = fiducial_coordinates[2].x, fiducial_coordinates[2].y
+        x20, y20 = (995, 672)
+        scale_x = (x2-x1)/(x20-x10)
+        scale_y = (y2-y1)/(y20-y10)
+        pts_src = (absolute_coordinates - np.array([[x10, y10],[x10, y10],[x10, y10],[x10, y10]], dtype=float)) * np.array([[scale_x, scale_y], [scale_x, scale_y], [scale_x, scale_y], [scale_x, scale_y]], dtype=float)
+        pts_src = pts_src + np.array([[x1, y1], [x1, y1], [x1, y1], [x1, y1]], dtype=float)
 
     width = 400
     height = 300
@@ -251,11 +265,11 @@ def back_homography(fiducial_coordinate: tuple[float, float], image: np.ndarray)
 
     warped_image = cv2.warpPerspective(image, homography_matrix, (width, height))
 
-    #plt.figure(figsize=(10, 6))
-    #plt.imshow(cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB))
-    #plt.title("Warped Image with Homography Transformation (One Fiducial)")
-    #plt.axis('off')
-    #plt.show()
+    plt.figure(figsize=(10, 6))
+    plt.imshow(cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB))
+    plt.title("Warped Image with Homography Transformation (One Fiducial)")
+    plt.axis('off')
+    plt.show()
 
     return warped_image
 
@@ -298,7 +312,7 @@ def classify_nozzles(warped_image: np.ndarray, section: str ='front') -> tuple[d
     # Calculate mean and standard deviation for statistical outlier detection
     mean_ratio = np.mean(white_ratios)
     std_ratio = np.std(white_ratios)
-    threshold_z = -1.0  # Z-score threshold for 2 standard deviations
+    threshold_z = -1.75  # Z-score threshold for 2 standard deviations
 
     nozzle_status = []
 
@@ -306,6 +320,7 @@ def classify_nozzles(warped_image: np.ndarray, section: str ='front') -> tuple[d
     for i, ratio in enumerate(white_ratios):
         z_score = (ratio - mean_ratio) / std_ratio if std_ratio > 0 else 0
         is_clogged = z_score < threshold_z or ratio < 0.05
+        print(f"Nozzle {i + 1}: White ratio = {ratio:.2f}, Z-score = {z_score:.2f} (threshold = {threshold_z}), Clogged = {is_clogged}")
         nozzle_status.append(is_clogged)
 
     # Return the status of front or back nozzles and the mean white_ratio

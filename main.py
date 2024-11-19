@@ -1,8 +1,9 @@
-from detect_clogs import threshold_video_movement, detect_fiducial, front_homography, back_homography, classify_nozzles
+from detect_clogs import threshold_video_movement, detect_fiducials, front_homography, back_homography, classify_nozzles
 import time
 #from picamzero import Camera
 import requests
 import json
+import cv2
 
 def wait_until_fiducial_in_square(x: float, y: float, width: int, height: int) -> bool:
     """
@@ -54,24 +55,29 @@ def check_nozzles(cycles) -> dict[str, list[bool]]:
     """
     nozzle_status = {}
 
-    for cycle in cycles:
+    for i, cycle in enumerate(cycles):
         thresholded_image = cycle['thresholded_image']
-        fiducial_coordinate = cycle['fiducial_coordinate']
+        fiducial_coordinates = cycle['fiducial_coordinates']
 
         # Warp using both homographies
-        warped_front = front_homography(fiducial_coordinate, thresholded_image)
-        warped_back = back_homography(fiducial_coordinate, thresholded_image)
+        warped_front = front_homography(fiducial_coordinates, thresholded_image)
+        warped_back = back_homography(fiducial_coordinates, thresholded_image)
 
         # Classify nozzles for both
         report_front, mean_ratio_front = classify_nozzles(warped_front, section='front')
         report_back, mean_ratio_back = classify_nozzles(warped_back, section='back')
 
         # Decide which report is valid based on mean white ratio
-        if mean_ratio_front > mean_ratio_back:
+        if mean_ratio_front < 0.1 and mean_ratio_back < 0.1:
+            # Both rows are too dark to be valid
+            pass
+        elif mean_ratio_front > mean_ratio_back:
             # It's the front row
+            print(f"Cycle {i}: Front row has a mean white ratio of {mean_ratio_front}, better than back row's {mean_ratio_back}")
             nozzle_status.update(report_front)
         else:
             # It's the back row
+            print(f"Cycle {i}: Back row has a mean white ratio of {mean_ratio_back}, better than front row's {mean_ratio_front}")
             nozzle_status.update(report_back)
 
     return nozzle_status
@@ -113,15 +119,23 @@ def main():
     # Take a 10 second video 
     #take_10_second_video('output.mjpeg')
 
-    cycles = threshold_video_movement('output.mjpeg')
+    cycles = threshold_video_movement('videos/varied_flavors/primeSA2.mjpeg')
 
     # Check if the nozzles are clogged
     nozzle_report = check_nozzles(cycles)
     print(nozzle_report)
+    # Display the thresholded images for debugging
+    #for cycle in cycles:
+    #    thresholded_image = cycle['thresholded_image']
+    #    fiducial_coordinate = cycle['fiducial_coordinates']
+    #    cv2.imshow('Thresholded Image', thresholded_image)
+    #    cv2.waitKey(0)
+    #    cv2.destroyAllWindows()
+
     # Send the nozzle report to a webhook along with video if nozzles are clogged
     if any(nozzle_report.get('front', [])) or any(nozzle_report.get('back', [])):
         print("Nozzles are clogged, sending report to webhook.")
-        send_webhook(nozzle_report, 'output.mjpeg')
+        #send_webhook(nozzle_report, 'output.mjpeg')
     else:
         print("Nozzles are not clogged, no action needed.")
 
