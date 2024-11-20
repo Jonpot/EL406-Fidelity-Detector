@@ -163,11 +163,11 @@ def front_homography(fiducial_coordinates: dict[int, tuple[float, float]], image
             x, y = fiducial_coordinates[2].x, fiducial_coordinates[2].y
             x0, y0 = (995, 672)
             # pts_src is thus the absolute coordinates of the fiducial plus the difference between the absolute coordinates of the fiducial and the relative coordinates of the nozzles
-            pts_src = absolute_coordinates + np.array([[x - x0, y - y0]*4], dtype=float) 
+            pts_src = absolute_coordinates + np.array([[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0]], dtype=float) 
         else:
             x, y = fiducial_coordinates[1].x, fiducial_coordinates[1].y
             x0, y0 = (277, 184)
-            pts_src = absolute_coordinates + np.array([[x - x0, y - y0]*4], dtype=float)
+            pts_src = absolute_coordinates + np.array([[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0]], dtype=float)
         print("One Fiducial detected. Using relative coordinates.\n")
     else:
         print("Multiple fiducials detected. Using fiducial coordinates.")
@@ -198,11 +198,11 @@ def front_homography(fiducial_coordinates: dict[int, tuple[float, float]], image
     warped_image = cv2.warpPerspective(image, homography_matrix, (width, height))
 
     # Display the warped image
-    plt.figure(figsize=(10, 6))
-    plt.imshow(cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB))
-    plt.title("Warped Image with Homography Transformation (One Fiducial)")
-    plt.axis('off')
-    plt.show()
+    #plt.figure(figsize=(10, 6))
+    #plt.imshow(cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB))
+    #plt.title("Warped Image with Homography Transformation (One Fiducial)")
+    #plt.axis('off')
+    #plt.show()
 
     return warped_image
 
@@ -234,11 +234,11 @@ def back_homography(fiducial_coordinates: dict[int,tuple[float, float]], image: 
             x, y = fiducial_coordinates[2].x, fiducial_coordinates[2].y
             x0, y0 = (995, 672)
             # pts_src is thus the absolute coordinates of the fiducial plus the difference between the absolute coordinates of the fiducial and the relative coordinates of the nozzles
-            pts_src = absolute_coordinates + np.array([[x - x0, y - y0]*4], dtype=float) 
+            pts_src = absolute_coordinates + np.array([[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0]], dtype=float) 
         else:
             x, y = fiducial_coordinates[1].x, fiducial_coordinates[1].y
             x0, y0 = (277, 184)
-            pts_src = absolute_coordinates + np.array([[x - x0, y - y0]*4], dtype=float)
+            pts_src = absolute_coordinates + np.array([[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0]], dtype=float)
         print("One Fiducial detected. Using relative coordinates.\n")
     else:
         print("Multiple fiducials detected. Using fiducial coordinates.")
@@ -265,11 +265,11 @@ def back_homography(fiducial_coordinates: dict[int,tuple[float, float]], image: 
 
     warped_image = cv2.warpPerspective(image, homography_matrix, (width, height))
 
-    plt.figure(figsize=(10, 6))
-    plt.imshow(cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB))
-    plt.title("Warped Image with Homography Transformation (One Fiducial)")
-    plt.axis('off')
-    plt.show()
+    #plt.figure(figsize=(10, 6))
+    #plt.imshow(cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB))
+    #plt.title("Warped Image with Homography Transformation (One Fiducial)")
+    #plt.axis('off')
+    #plt.show()
 
     return warped_image
 
