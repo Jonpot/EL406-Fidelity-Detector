@@ -1,4 +1,4 @@
-from detect_clogs import threshold_video_movement, detect_fiducials, front_homography, back_homography, classify_nozzles
+from detect_clogs import threshold_video_movement, detect_fiducials, homography, classify_nozzles
 import time
 #from picamzero import Camera
 import requests
@@ -64,12 +64,12 @@ def check_nozzles(cycles) -> dict[str, list[bool]]:
         fiducial_coordinates = cycle['fiducial_coordinates']
 
         # Warp using both homographies
-        warped_front = front_homography(fiducial_coordinates, thresholded_image)
-        warped_back = back_homography(fiducial_coordinates, thresholded_image)
+        warped_front = homography(fiducial_coordinates, thresholded_image, "A")
+        warped_back = homography(fiducial_coordinates, thresholded_image, "B")
 
         # Classify nozzles for both
-        report_front, mean_ratio_front = classify_nozzles(warped_front, section='front')
-        report_back, mean_ratio_back = classify_nozzles(warped_back, section='back')
+        report_front, mean_ratio_front = classify_nozzles(warped_front, section="A")
+        report_back, mean_ratio_back = classify_nozzles(warped_back, section="B")
 
         # Decide which report is valid based on mean white ratio
         if mean_ratio_front < 0.1 and mean_ratio_back < 0.1:
@@ -133,27 +133,12 @@ def send_webhook(nozzle_report: dict[str,list[bool]], video_path: str, email: st
 
 
 def main():
-    # Wait until fiducial is within the absolute square it is expected to be in 
-    #ok = wait_until_fiducial_in_square(0, 0, 0.1, 0.1)
-    #if not ok:
-    #    print("Fiducial not found in square for 10 seconds, assuming faulty test start.")
-    #    return
-
-    # Take a 10 second video 
-    #take_10_second_video('output.mjpeg')
 
     cycles = threshold_video_movement('output.mjpeg')
 
     # Check if the nozzles are clogged
     nozzle_report = check_nozzles(cycles)
     print(nozzle_report)
-    # Display the thresholded images for debugging
-    #for cycle in cycles:
-    #    thresholded_image = cycle['thresholded_image']
-    #    fiducial_coordinate = cycle['fiducial_coordinates']
-    #    cv2.imshow('Thresholded Image', thresholded_image)
-    #    cv2.waitKey(0)
-    #    cv2.destroyAllWindows()
 
     # Send the nozzle report to a webhook along with video if nozzles are clogged
     if any(nozzle_report.get('front', [])) or any(nozzle_report.get('back', [])):
