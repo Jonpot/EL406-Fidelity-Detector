@@ -2,14 +2,15 @@ import time
 import subprocess
 import os
 
-def take_10_second_video(output_path):
+def take_n_second_video(output_path, num_seconds):
     """
-    Records a 10-second video using the Raspberry Pi camera.
+    Records an n-second video using the Raspberry Pi camera.
 
     Args:
         output_path (str): Path to save the recorded video.
+        num_seconds (int): Duration of the video in seconds.
     """
-    record_command = f"libcamera-vid -t 10000 --codec h264 -o {output_path} --width 1280 --height 900"
+    record_command = f"libcamera-vid -t {num_seconds * 1000} --codec h264 -o {output_path} --width 1280 --height 900"
     subprocess.run(record_command, shell=True)
 
 def send_video_to_central(video_path, remote_ip, remote_user, remote_path):
@@ -54,6 +55,7 @@ def verify_video_transfer(remote_ip, remote_user, remote_video_path):
     result = subprocess.run(check_command, shell=True, stdout=subprocess.PIPE)
     return b'exists' in result.stdout
 
+
 def main():
     video_filename = "video.h264"
     video_path = f"/home/pi/{video_filename}"
@@ -62,35 +64,31 @@ def main():
     remote_path = f"/home/{remote_user}/videos/"  # Replace with the destination folder on the central PC
     remote_script = f"/home/{remote_user}/main.py"  # Replace with the path to main.py on the central PC
     delay = 4  # Delay in seconds before triggering processing
-    time_between_loops = 20  # idk if 20 seconds are enough, can adjust as needed.
+    
+    print("Starting a new cycle...")
 
-    # Loop until down
-    while True:
-        print("Starting a new cycle...")
+    # Step 1: Record video
+    print("Recording video...")
+    take_n_second_video(video_path, 20)
 
-        # Step 1: Record video
-        print("Recording video...")
-        take_10_second_video(video_path)
+    # Step 2: Send video to central PC
+    print("Sending video to central PC...")
+    send_video_to_central(video_path, remote_ip, remote_user, remote_path)
 
-        # Step 2: Send video to central PC
-        print("Sending video to central PC...")
-        send_video_to_central(video_path, remote_ip, remote_user, remote_path)
+    # Step 3: Verify video transfer and wait
+    print("Verifying video transfer...")
+    remote_video_path = f"{remote_path}{video_filename}"
+    time.sleep(delay)  # Ensure enough time for transfer
+    if verify_video_transfer(remote_ip, remote_user, remote_video_path):
+        print("Video transfer verified.")
 
-        # Step 3: Verify video transfer and wait
-        print("Verifying video transfer...")
-        remote_video_path = f"{remote_path}{video_filename}"
-        time.sleep(delay)  # Ensure enough time for transfer
-        if verify_video_transfer(remote_ip, remote_user, remote_video_path):
-            print("Video transfer verified.")
+        # Step 4: Trigger processing
+        print("Triggering processing on central PC...")
+        trigger_processing_on_central(remote_ip, remote_user, remote_script, remote_video_path)
+    else:
+        print("Video transfer failed. Retrying next cycle.")
 
-            # Step 4: Trigger processing
-            print("Triggering processing on central PC...")
-            trigger_processing_on_central(remote_ip, remote_user, remote_script, remote_video_path)
-        else:
-            print("Video transfer failed. Retrying next cycle.")
-
-        print("Cycle complete. Waiting for next cycle...")
-        time.sleep(time_between_loops)  # Wait for the next cycle 
+    print("Cycle complete. Waiting for next cycle...")
 
 if __name__ == "__main__":
     main()

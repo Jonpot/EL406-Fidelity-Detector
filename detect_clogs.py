@@ -1,3 +1,4 @@
+import json
 import cv2
 import numpy as np
 from robotpy_apriltag import AprilTagDetector as apriltag
@@ -42,6 +43,10 @@ def threshold_video_movement(video_path: str) -> list[dict]:
         #    continue # Skip every other frame to speed up processing
         if fiducial_coordinates is None:
             fiducial_coordinates = detect_fiducials(frame)
+            if len(fiducial_coordinates) == 0:
+                # No fiducials detected yet, head not yet in frame
+                fiducial_coordinates = None
+                continue
 
         # Apply background subtraction to get the foreground mask
         fg_mask = backSub.apply(frame)
@@ -137,44 +142,41 @@ def detect_fiducials(frame: np.ndarray) -> dict[int, np.ndarray]:
     return centers
 
 
-def front_homography(fiducial_coordinates: dict[int, tuple[float, float]], image: np.ndarray) -> np.ndarray:
+def homography(fiducial_coordinates: dict[int, tuple[float, float]], image: np.ndarray, row: str) -> np.ndarray:
     """
     Apply homography transformation to the image using the front fiducial coordinate.
 
     Args:
         fiducial_coordinate: The coordinate of the front fiducial.
         image: The input image.
+        row: The row of nozzles to process ('A' or 'B').
 
     Returns:
         The warped image after homography transformation.
     """
-    absolute_coordinates = np.array([
-            [449, 247],
-            [902, 321],
-            [455, 421],
-            [914, 467] 
-            # This is for front nozzles!
-        ], dtype=float)
+    # Load the absolute coordinates of the nozzles from calibration_data.json
+    calibration_data = json.load(open('calibration_data.json'))
+    absolute_coordinates = np.array([calibration_data[row]["homography"]], dtype=float)
+    x10 = calibration_data[row]["fiducial_coordinates"]["1"][0]
+    y10 = calibration_data[row]["fiducial_coordinates"]["1"][1]
+    x20 = calibration_data[row]["fiducial_coordinates"]["2"][0]
+    y20 = calibration_data[row]["fiducial_coordinates"]["2"][1]
     if fiducial_coordinates is None:
         pts_src = absolute_coordinates
         print("No fiducials detected. Using absolute coordinates.\n")
     elif len(fiducial_coordinates) == 1:
         if 2 in fiducial_coordinates:
             x, y = fiducial_coordinates[2].x, fiducial_coordinates[2].y
-            x0, y0 = (995, 672)
             # pts_src is thus the absolute coordinates of the fiducial plus the difference between the absolute coordinates of the fiducial and the relative coordinates of the nozzles
-            pts_src = absolute_coordinates + np.array([[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0]], dtype=float) 
+            pts_src = absolute_coordinates + np.array([[x - x20, y - y20],[x - x20, y - y20],[x - x20, y - y20],[x - x20, y - y20]], dtype=float) 
         else:
             x, y = fiducial_coordinates[1].x, fiducial_coordinates[1].y
-            x0, y0 = (277, 184)
-            pts_src = absolute_coordinates + np.array([[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0]], dtype=float)
+            pts_src = absolute_coordinates + np.array([[x - x10, y - y10],[x - x10, y - y10],[x - x10, y - y10],[x - x10, y - y10]], dtype=float)
         print("One Fiducial detected. Using relative coordinates.\n")
     else:
         print("Multiple fiducials detected. Using fiducial coordinates.")
         x1, y1 = fiducial_coordinates[1].x, fiducial_coordinates[1].y
-        x10, y10 = (277, 184)
         x2, y2 = fiducial_coordinates[2].x, fiducial_coordinates[2].y
-        x20, y20 = (995, 672)
         scale_x = (x2-x1)/(x20-x10)
         scale_y = (y2-y1)/(y20-y10)
         pts_src = (absolute_coordinates - np.array([[x10, y10],[x10, y10],[x10, y10],[x10, y10]], dtype=float)) * np.array([[scale_x, scale_y], [scale_x, scale_y], [scale_x, scale_y], [scale_x, scale_y]], dtype=float)
@@ -206,80 +208,13 @@ def front_homography(fiducial_coordinates: dict[int, tuple[float, float]], image
 
     return warped_image
 
-
-def back_homography(fiducial_coordinates: dict[int,tuple[float, float]], image: np.ndarray) -> np.ndarray:
-    """
-    Apply homography transformation to the image using the back fiducial coordinate.
-
-    Args:
-        fiducial_coordinate: The coordinate of the back fiducial.
-        image: The input image.
-
-    Returns:
-        The warped image after homography transformation.
-    """
-    # print(len(detections))
-    absolute_coordinates = np.array([
-                            [380, 239], 
-                            [844, 334], 
-                            [388, 428], 
-                            [846, 459] 
-                            # This is for BACK nozzles!
-                        ], dtype=float)
-    if fiducial_coordinates is None:
-        pts_src = absolute_coordinates
-        print("No fiducials detected. Using absolute coordinates.\n")
-    elif len(fiducial_coordinates) == 1:
-        if 2 in fiducial_coordinates:
-            x, y = fiducial_coordinates[2].x, fiducial_coordinates[2].y
-            x0, y0 = (995, 672)
-            # pts_src is thus the absolute coordinates of the fiducial plus the difference between the absolute coordinates of the fiducial and the relative coordinates of the nozzles
-            pts_src = absolute_coordinates + np.array([[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0]], dtype=float) 
-        else:
-            x, y = fiducial_coordinates[1].x, fiducial_coordinates[1].y
-            x0, y0 = (277, 184)
-            pts_src = absolute_coordinates + np.array([[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0],[x - x0, y - y0]], dtype=float)
-        print("One Fiducial detected. Using relative coordinates.\n")
-    else:
-        print("Multiple fiducials detected. Using fiducial coordinates.")
-        x1, y1 = fiducial_coordinates[1].x, fiducial_coordinates[1].y
-        x10, y10 = (277, 184)
-        x2, y2 = fiducial_coordinates[2].x, fiducial_coordinates[2].y
-        x20, y20 = (995, 672)
-        scale_x = (x2-x1)/(x20-x10)
-        scale_y = (y2-y1)/(y20-y10)
-        pts_src = (absolute_coordinates - np.array([[x10, y10],[x10, y10],[x10, y10],[x10, y10]], dtype=float)) * np.array([[scale_x, scale_y], [scale_x, scale_y], [scale_x, scale_y], [scale_x, scale_y]], dtype=float)
-        pts_src = pts_src + np.array([[x1, y1], [x1, y1], [x1, y1], [x1, y1]], dtype=float)
-
-    width = 400
-    height = 300
-    pts_dst = np.array([
-        [0, 0],  # Top-left
-        [width - 1, 0],  # Top-right
-        [0, height - 1],  # Bottom-left
-        [width - 1, height - 1]  # Bottom-right
-    ], dtype=float)
-
-    # Calculate the homography matrix
-    homography_matrix, status = cv2.findHomography(pts_src, pts_dst)
-
-    warped_image = cv2.warpPerspective(image, homography_matrix, (width, height))
-
-    #plt.figure(figsize=(10, 6))
-    #plt.imshow(cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB))
-    #plt.title("Warped Image with Homography Transformation (One Fiducial)")
-    #plt.axis('off')
-    #plt.show()
-
-    return warped_image
-
-def classify_nozzles(warped_image: np.ndarray, section: str ='front') -> tuple[dict[str, list[bool]], float]:
+def classify_nozzles(warped_image: np.ndarray, section: str ='A', display: bool = False) -> tuple[dict[str, list[bool]], float]:
     """
     Classify nozzle regions as clogged or not clogged based on white pixel ratio.
 
     Args:
         warped_image: The input image of nozzle regions after homography.
-        section: Specify which section of nozzles to process ('front' or 'back').
+        section: Specify which section of nozzles to process ('A' or 'B').
 
     Returns:
         A tuple containing:
@@ -322,6 +257,27 @@ def classify_nozzles(warped_image: np.ndarray, section: str ='front') -> tuple[d
         is_clogged = z_score < threshold_z or ratio < 0.05
         print(f"Nozzle {i + 1}: White ratio = {ratio:.2f}, Z-score = {z_score:.2f} (threshold = {threshold_z}), Clogged = {is_clogged}")
         nozzle_status.append(is_clogged)
+
+    # if displaying, show the image with the nozzles marked
+    if display:
+        # convert to color first 
+        if len(warped_image.shape) == 2:
+            warped_image = cv2.cvtColor(warped_image, cv2.COLOR_GRAY2BGR)
+        for i, status in enumerate(nozzle_status):
+            x_start = i * nozzle_width
+            x_end = (i + 1) * nozzle_width if (i + 1) < num_nozzles else width
+
+            y_start = int(0.10 * height)
+            y_end = int(0.90 * height)
+
+            color = (0, 0, 255) if status else (0, 255, 0)
+            cv2.rectangle(warped_image, (x_start, y_start), (x_end, y_end), color, 2)
+
+        plt.figure(figsize=(10, 6))
+        plt.imshow(cv2.cvtColor(warped_image, cv2.COLOR_BGR2RGB))
+        plt.title(f"Nozzle Classification for Section {section}")
+        plt.axis('off')
+        plt.show()
 
     # Return the status of front or back nozzles and the mean white_ratio
     return {section: nozzle_status}, mean_ratio
