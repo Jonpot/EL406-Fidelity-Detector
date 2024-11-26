@@ -9,8 +9,8 @@ from detect_clogs import threshold_video_movement
 
 SCALING_FACTOR = 2
 
-def calibrate_homography():
-    cycles = threshold_video_movement('output.mjpeg')
+def calibrate_homography(filepath: str = 'output.mjpeg'):
+    cycles = threshold_video_movement(filepath)
     if not cycles:
         print("No cycles detected.")
         return
@@ -18,10 +18,10 @@ def calibrate_homography():
     frames = []
     for row, cycle in enumerate(cycles):
         frame = cycle['thresholded_image']
-        # convert to RGB
+        # Convert to RGB
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frames.append(frame)
-        # update the json with the fiducial coordinates
+        # Update the JSON with the fiducial coordinates
         with open('calibration_data.json', 'r') as f:
             calibration_data = json.load(f)
             row_name = 'A' if row == 0 else 'B'
@@ -31,7 +31,6 @@ def calibrate_homography():
             if 2 in coords:
                 calibration_data[row_name]['fiducial_coordinates']["2"] = [int(coords[2].x), int(coords[2].y)]
         with open('calibration_data.json', 'w') as f:
-            #print(calibration_data)
             json.dump(calibration_data, f, indent=3)
 
     for row, frame in enumerate(frames):
@@ -41,32 +40,32 @@ def calibrate_homography():
 
         def update_homography_display():
             section = section_var.get()
+            # Reupdate the data from the file
+            with open('calibration_data.json', 'r') as f:
+                calibration_data = json.load(f)
+
             pts_src = np.array([calibration_data[section]["homography"]], dtype=float)
             for i, circle in enumerate(circles):
-                # get the center of the circle (average of the four points)
+                # Get the center of the circle
                 x = np.mean(canvas.coords(circle)[0:4:2])
                 y = np.mean(canvas.coords(circle)[1:4:2])
-                # double the x and y values to match the img scaling
+                # Scale x and y values to match the image scaling
                 x *= SCALING_FACTOR
                 y *= SCALING_FACTOR
                 pts_src[0][i] = [x, y]
 
-            # Update calibration data
+            # Update calibration data in memory
             calibration_data[section]["homography"] = pts_src.tolist()[0]
-            with open('calibration_data.json', 'w') as f:
-                json.dump(calibration_data, f, indent=3)
 
-            # Load the updated calibration data
-            with open('calibration_data.json', 'r') as f:
-                new_calibration_data = json.load(f)
-                pts_src_a = np.array([new_calibration_data['A']["homography"]], dtype=float)
-                pts_src_b = np.array([new_calibration_data['B']["homography"]], dtype=float)
+            # Update homography displays using the updated calibration data
+            pts_src_a = np.array([calibration_data['A']["homography"]], dtype=float)
+            pts_src_b = np.array([calibration_data['B']["homography"]], dtype=float)
 
             # Update homography displays
-            update_homography_image(pts_src_a, section, 'A')
-            update_homography_image(pts_src_b, section, 'B')
+            update_homography_image(pts_src_a, 'A')
+            update_homography_image(pts_src_b, 'B')
 
-        def update_homography_image(pts_src, section, row):
+        def update_homography_image(pts_src, row):
             width, height = 400, 300
             pts_dst = np.array([
                 [0, 0],  # Top-left
@@ -102,47 +101,92 @@ def calibrate_homography():
             canvas.coords(item, event.x - 5, event.y - 5, event.x + 5, event.y + 5)
             update_homography_display()
 
+        def save_calibration_data():
+            section = section_var.get()
+            # Load existing calibration data from file
+            with open('calibration_data.json', 'r') as f:
+                existing_data = json.load(f)
+            # Update the data for the selected section
+            existing_data[section]['homography'] = calibration_data[section]['homography']
+            # Write back to file
+            with open('calibration_data.json', 'w') as f:
+                json.dump(existing_data, f, indent=3)
+            status_var.set(f"Calibration data for section {section} saved.")
+
         # Create tkinter GUI
         root = tk.Tk()
         root.title("Homography Calibration")
 
-        section_var = tk.StringVar(value='A')
-        section_dropdown = ttk.Combobox(root, textvariable=section_var, values=['A', 'B'])
-        # set the default value to be the current row
-        section_var.set('A' if row == 0 else 'B')
-        section_dropdown.pack()
+        # Set the style
+        style = ttk.Style()
+        style.theme_use('clam')
 
+        # Create main frame
+        mainframe = ttk.Frame(root, padding="10 10 10 10")
+        mainframe.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.E, tk.S))
+        root.columnconfigure(0, weight=1)
+        root.rowconfigure(0, weight=1)
+
+        # Section dropdown
+        section_var = tk.StringVar()
+        section_var.set('A' if row == 0 else 'B')
+        section_label = ttk.Label(mainframe, text="Select Section:")
+        section_label.grid(row=0, column=0, sticky=tk.W)
+        section_dropdown = ttk.Combobox(mainframe, textvariable=section_var, values=['A', 'B'], state='readonly')
+        section_dropdown.grid(row=0, column=1, sticky=tk.W)
+        section_dropdown.bind('<<ComboboxSelected>>', lambda e: update_homography_display())
+
+        # Image canvas
         img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        # scale the image to fit the window - 50%
+        # Scale the image
         img = img.resize((img.width // SCALING_FACTOR, img.height // SCALING_FACTOR))
         img_tk = ImageTk.PhotoImage(img)
-        canvas = Canvas(root, width=img.width, height=img.height)
+        canvas_frame = ttk.Frame(mainframe)
+        canvas_frame.grid(row=1, column=0, columnspan=2, pady=10)
+        canvas = Canvas(canvas_frame, width=img.width, height=img.height, highlightthickness=1, highlightbackground="gray")
         canvas.pack()
         canvas.create_image(0, 0, anchor=tk.NW, image=img_tk)
 
+        # Circles for homography points
         circles = []
         homography = calibration_data['A']['homography'] if row == 0 else calibration_data['B']['homography']
         for x, y in homography:
-            # match img scaling
+            # Adjust for image scaling
             x = x // SCALING_FACTOR
             y = y // SCALING_FACTOR
-            circle = canvas.create_oval(x-5, y-5, x+5, y+5, fill='red')
+            circle = canvas.create_oval(x - 5, y - 5, x + 5, y + 5, fill='red', outline='black', width=2)
             canvas.tag_bind(circle, '<B1-Motion>', on_circle_drag)
             circles.append(circle)
 
-        label_A = tk.Label(root, text="A")
-        label_A.pack(side=tk.LEFT)
-        homography_label_A = tk.Label(root)
-        homography_label_A.pack(side=tk.LEFT)
+        # Save button
+        button_frame = ttk.Frame(mainframe)
+        button_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        save_button = ttk.Button(button_frame, text="Save", command=save_calibration_data)
+        save_button.pack()
 
-        label_B = tk.Label(root, text="B")
-        label_B.pack(side=tk.RIGHT)
-        homography_label_B = tk.Label(root)
-        homography_label_B.pack(side=tk.RIGHT)
+        # Homography images display
+        homography_frame = ttk.Frame(mainframe, padding="10 10 10 10")
+        homography_frame.grid(row=3, column=0, columnspan=2)
+
+        label_A = ttk.Label(homography_frame, text="Section A", font=("Helvetica", 12, 'bold'))
+        label_A.grid(row=0, column=0, padx=10)
+        homography_label_A = ttk.Label(homography_frame)
+        homography_label_A.grid(row=1, column=0, padx=10)
+
+        label_B = ttk.Label(homography_frame, text="Section B", font=("Helvetica", 12, 'bold'))
+        label_B.grid(row=0, column=1, padx=10)
+        homography_label_B = ttk.Label(homography_frame)
+        homography_label_B.grid(row=1, column=1, padx=10)
+
+        # Add a status bar
+        status_var = tk.StringVar()
+        status_var.set("Drag the red points to adjust the homography. Select section A or B.")
+        status_bar = ttk.Label(root, textvariable=status_var, relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.grid(row=1, column=0, sticky=(tk.W, tk.E))
 
         update_homography_display()
 
         root.mainloop()
 
 # Call the calibration function
-calibrate_homography()
+calibrate_homography(filepath='videos/varied_flavors/primeSAB.mjpeg')
